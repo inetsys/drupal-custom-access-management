@@ -1,0 +1,164 @@
+<?php
+
+/** Implements hook_permission() */
+function custom_access_management_permission(){
+	$perms = array();
+
+	// Taxonomy
+	if(module_exists('taxonomy')){
+		// List vocabularies
+		$perms['custom access list taxonomy vocabularies'] = array(
+			'title' => t('List taxonomy vocabularies'),
+		);
+		// Add vocabulary
+		$perms['custom access add taxonomy vocabulary'] = array(
+			'title' => t('Add taxonomy vocabulary'),
+		);
+		// View all vocabularies
+		$perms['custom access view all vocabularies'] = array(
+			'title' => t('View all vocabularies'),
+		);
+		foreach(taxonomy_get_vocabularies() as $vocabulary){
+			// View vocabulary
+			$perms['custom access view taxonomy vocabulary '.$vocabulary->machine_name] = array(
+				'title' => t('View taxonomy vocabulary %name', array('%name' => $vocabulary->name)),
+			);
+			// Edit vocabulary
+			$perms['custom access edit taxonomy vocabulary '.$vocabulary->machine_name] = array(
+				'title' => t('Edit taxonomy vocabulary %name', array('%name' => $vocabulary->name)),
+			);
+			// Add term to vocabulary
+			$perms['custom access add term to taxonomy vocabulary '.$vocabulary->machine_name] = array(
+				'title' => t('Add term to taxonomy vocabulary %name', array('%name' => $vocabulary->name)),
+			);
+			// List terms in vocabulary
+			$perms['custom access list terms in taxonomy vocabulary '.$vocabulary->machine_name] = array(
+				'title' => t('List taxonomy terms in vocabulary %name', array('%name' => $vocabulary->name)),
+			);
+		}
+	}
+
+	// Menus
+	if(module_exists('menu')){
+		// List menus
+		$perms['custom access list menus'] = array(
+			'title' => t('List menus'),
+		);
+		foreach(menu_load_all() as $menu){
+			// View menu
+			$perms['custom access view menu '.$menu['menu_name']] = array(
+				'title' => t('View menu %name', array('%name' => $menu['title'])),
+			);
+			// Edit menu
+			$perms['custom access edit item in menu '.$menu['menu_name']] = array(
+				'title' => t('Edit item in menu %name', array('%name' => $menu['title'])),
+			);
+			// Delete menu
+		}
+	}
+
+	return $perms;
+}
+
+/** Implements hook_menu_alter() */
+function custom_access_management_menu_alter(&$items){
+	// Taxonomy
+
+	// List vocabularies
+	_custom_access_management_add_access_permission('admin/structure/taxonomy', 'custom access list taxonomy vocabularies', $items);
+	// Add vocabulary
+	_custom_access_management_add_access_permission('admin/structure/taxonomy/add', 'custom access add taxonomy vocabulary', $items);
+	// List terms in vocabulary
+	_custom_access_management_set_access_callback('admin/structure/taxonomy/%taxonomy_vocabulary_machine_name', '_custom_access_management_access_callback_view_vocabulary', array(3), $items);
+	// Add term to vocabulary
+	_custom_access_management_set_access_callback('admin/structure/taxonomy/%taxonomy_vocabulary_machine_name/add', '_custom_access_management_access_callback_add_term_to_vocabulary', array(3), $items);
+
+	// Menu
+
+	// List menus
+	_custom_access_management_add_access_permission('admin/structure/menu', 'custom access list menus', $items);
+	// View menu
+	_custom_access_management_set_access_callback('admin/structure/menu/manage/%menu', '_custom_access_management_access_callback_view_menu', array(4), $items);
+	// Edit term in menu
+	_custom_access_management_set_access_callback('admin/structure/menu/item/%menu_link/edit', '_custom_access_management_access_callback_edit_menu_item', array(4), $items);
+}
+
+function _custom_access_management_add_access_permission($path, $permission, &$items){
+	if(isset($items[$path]) && (!isset($items[$path]['access callback']) || $items[$path]['access callback'] == 'user_access')){
+		$item = &$items[$path];
+		$item['access arguments'][] = $permission;
+		$item['access callback'] = '_custom_access_management_user_access';
+	}
+}
+
+function _custom_access_management_set_access_callback($path, $callback, $args, &$items){
+	if(isset($items[$path])){
+		$item = &$items[$path];
+		$item['access arguments'] = $args;
+		$item['access callback'] = $callback;
+	}
+}
+
+function _custom_access_management_user_access(){
+	$allow_access = false;
+	$args = func_get_args();
+	foreach($args as $permission){
+		$allow_access |= user_access($permission);
+	}
+
+	return $allow_access;
+}
+
+// Taxonomy
+
+/** Access callback for admin/structure/taxonomy/%taxonomy_vocabulary_machine_name */
+function _custom_access_management_access_callback_view_vocabulary($vocabulary){
+	return user_access('administer taxonomy') || user_access('custom access view taxonomy vocabulary '.$vocabulary->machine_name);
+}
+/** Access callback for admin/structure/taxonomy/%taxonomy_vocabulary_machine_name/add */
+function _custom_access_management_access_callback_add_term_to_vocabulary($vocabulary){
+	return user_access('administer taxonomy') || user_access('custom access add term to taxonomy vocabulary '.$vocabulary->machine_name);
+}
+
+/** Implements hook_form_FORM_ID_alter()
+ * FORM_ID: taxonomy_overview_vocabularies */
+function custom_access_management_form_taxonomy_overview_vocabularies_alter(&$form, &$form_state){
+	$vocabularies = taxonomy_get_vocabularies();
+	$visibles = array();
+	foreach($vocabularies as $vocabulary){
+		if(user_access('administer taxonomy') || user_access('custom access view all vocabularies') || user_access('custom access view taxonomy vocabulary '.$vocabulary->machine_name)){
+			$form[$vocabulary->vid]['edit']['#access'] = user_access('administer taxonomy') || user_access('custom access edit taxonomy vocabulary '.$vocabulary->machine_name);
+			$form[$vocabulary->vid]['list']['#access'] = user_access('administer taxonomy') || user_access('custom access list terms in taxonomy vocabulary '.$vocabulary->machine_name);
+			$form[$vocabulary->vid]['add']['#access'] = user_access('administer taxonomy') || user_access('custom access add term to taxonomy vocabulary '.$vocabulary->machine_name);
+
+			$visibles[] = $vocabulary;
+		}else{
+			unset($form[$vocabulary->vid]);
+		}
+	}
+
+	if(count($visibles) == 1){
+		$vocabulary = reset($visibles);
+		if(isset($form[$vocabulary->vid]['weight'])){
+			unset($form[$vocabulary->vid]['weight']);
+		}
+	}
+	if(count($visibles) < 2 && isset($form['actions'])){
+		// Delete submit button
+		unset($form['actions']);
+	}
+}
+
+// Menu
+
+/** Access callback for admin/structure/menu/manage/%menu */
+function _custom_access_management_access_callback_view_menu($menu){
+	return user_access('administer menu') || user_access('custom access view menu '.$menu['menu_name']);
+}
+
+/** Access callback for  */
+function _custom_access_management_access_callback_edit_menu_item($item){
+	$menu_name = $item['menu_name'];
+
+	return user_access('administer menu') || user_access('custom access edit item in menu '.$menu_name);
+}
